@@ -4,43 +4,31 @@
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
 
+void setAll(int value);
+void updateStates();
+String formatStatus();
+
+int TOTAL = 4;
+int DELAY = 2000;
+
 ESP8266WiFiMulti WiFiMulti;
 WebSocketsServer webSocket = WebSocketsServer(81);
 
-int button1 = D5;
-int button2 = D6;
-int button3 = D7;
-int button4 = D8;
-
-int led1 = D1;
-int led2 = D2;
-int led3 = D3;
-int led4 = D4;
-
-int state1 = LOW;
-int state2 = LOW;
-int state3 = LOW;
-int state4 = LOW;
-
-int delaySecs = 2000;
+int buttons[] = {D5, 56, D7, D8};
+int leds[] = {D1, D2, D3, D4};
+int states[] = {LOW, LOW, LOW, LOW};
 
 void setup() {
-  pinMode(button1, INPUT);
-  pinMode(button2, INPUT);
-  pinMode(button3, INPUT);
-  pinMode(button4, INPUT);
-  pinMode(led1, OUTPUT);
-  pinMode(led2, OUTPUT);
-  pinMode(led3, OUTPUT);
-  pinMode(led4, OUTPUT);
-  digitalWrite(led1, HIGH);
-  digitalWrite(led2, HIGH);
-  digitalWrite(led3, HIGH);
-  digitalWrite(led4, HIGH);
+  for(int i=0;i<TOTAL;i++) {
+    pinMode(buttons[i], INPUT);
+  }
+  for(int i=0;i<TOTAL;i++) {
+    pinMode(leds[i], OUTPUT);
+  }
+  setAll(LOW);
   Serial.begin(9600);
   Serial.setDebugOutput(true);
   Serial.println("Started");
-  WiFiMulti.addAP("NarutoOT", "asdfghjkl");
   WiFiMulti.addAP("Bhk", "12345678");
   Serial.print("Connecting");
   while(WiFiMulti.run() != WL_CONNECTED) {
@@ -59,125 +47,102 @@ void setup() {
 
 void loop() {
   webSocket.loop();
-  
-  state1 = digitalRead(led1);
-  state2 = digitalRead(led2);
-  state3 = digitalRead(led3);
-  state4 = digitalRead(led4);
+  updateStates();
   return;
 
-  if(digitalRead(button1) == HIGH && digitalRead(button2) == HIGH) {
-    digitalWrite(led1, HIGH);
-    digitalWrite(led2, HIGH);
-    digitalWrite(led3, HIGH);
-    digitalWrite(led4, HIGH);
+  if(digitalRead(buttons[0]) == HIGH && digitalRead(buttons[1]) == HIGH) {
+    setAll(HIGH);
     Serial.printf("All Off\n");
-    delay(delaySecs);
+    webSocket.broadcastTXT(formatStatus().c_str());
+    delay(DELAY);
   }
-  if(digitalRead(button3) == HIGH && digitalRead(button4) == HIGH) {
-    digitalWrite(led1, LOW);
-    digitalWrite(led2, LOW);
-    digitalWrite(led3, LOW);
-    digitalWrite(led4, LOW);
+  if(digitalRead(buttons[2]) == HIGH && digitalRead(buttons[3]) == HIGH) {
+    setAll(LOW);
     Serial.printf("All On\n");
-    delay(delaySecs);
+    webSocket.broadcastTXT(formatStatus().c_str());
+    delay(DELAY);
   }
-  
 
-  if(digitalRead(button1) == HIGH) {
-    digitalWrite(led1, !state1);
-    Serial.printf("LED 1 is %i\n", state1);
-    webSocket.broadcastTXT(formatStatus().c_str());
-    delay(delaySecs);
+  for(int i=0;i<TOTAL;i++) {
+    if(digitalRead(buttons[i]) == HIGH) {
+      digitalWrite(leds[i], !states[i]);
+      Serial.printf("LED %i is %i\n", i+1, states[i]);
+      webSocket.broadcastTXT(formatStatus().c_str());
+      delay(DELAY);
+    }
   }
-  if(digitalRead(button2) == HIGH) {
-    digitalWrite(led2, !state2);
-    Serial.printf("LED 2 is %i\n", state2);
-    webSocket.broadcastTXT(formatStatus().c_str());
-    delay(delaySecs);
-  }
-  if(digitalRead(button3) == HIGH) {
-    digitalWrite(led3, !state3);
-    Serial.printf("LED 3 is %i\n", state3);
-    webSocket.broadcastTXT(formatStatus().c_str());
-    delay(delaySecs);
-  }
-  if(digitalRead(button4) == HIGH) {
-    digitalWrite(led4, !state4);
-    Serial.printf("LED 4 is %i\n", state4);
-    webSocket.broadcastTXT(formatStatus().c_str());
-    delay(delaySecs);
-  }
-  
+
 }
 
 
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
 
-    switch(type) {
-        case WStype_DISCONNECTED:
-            Serial.printf("[%u] Disconnected!\n", num);
-            break;
-        case WStype_CONNECTED:
-            {
-                IPAddress ip = webSocket.remoteIP(num);
-                Serial.printf("[%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
-                webSocket.sendTXT(num, formatStatus().c_str());
-            }
-            break;
-        case WStype_TEXT: {
-            Serial.printf("[%u] get Text: %s\n", num, payload);
-            StaticJsonBuffer<512> jsonBuffer;
-            JsonObject& root = jsonBuffer.parseObject(payload);
-            String type = root["type"];
-            if(type == "TOGGLE") {
-              int pin = root["pin"];
-              Serial.printf("Pin is %i",pin);
-              switch (pin) {
-              case 1: digitalWrite(led1, !digitalRead(led1));
-              break;
-              case 2: digitalWrite(led2, !digitalRead(led2));
-              break;
-              case 3: digitalWrite(led3, !digitalRead(led3));
-              break;
-              case 4: digitalWrite(led4, !digitalRead(led4));
-              break;
-              }
-            }
-            webSocket.broadcastTXT(formatStatus().c_str());
-            break;
-        }
-        case WStype_BIN:
-            Serial.printf("[%u] get binary length: %u\n", num, length);
-            hexdump(payload, length);
-            break;
+  switch(type) {
+    case WStype_DISCONNECTED:
+    Serial.printf("[%u] Disconnected!\n", num);
+    break;
+    case WStype_CONNECTED:
+    {
+      IPAddress ip = webSocket.remoteIP(num);
+      Serial.printf("[%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
+      webSocket.sendTXT(num, formatStatus().c_str());
     }
+    break;
+    case WStype_TEXT: {
+      Serial.printf("[%u] get Text: %s\n", num, payload);
+      StaticJsonBuffer<512> jsonBuffer;
+      JsonObject& root = jsonBuffer.parseObject(payload);
+      String type = root["type"];
+      if(type == "TOGGLE") {
+        int pin = root["pin"];
+        Serial.printf("Pin is %i",pin);
+        int i = pin - 1;
+        digitalWrite(leds[i], !digitalRead(leds[i]));
+        webSocket.broadcastTXT(formatStatus().c_str());
+        break;
+      }
+    }
+    case WStype_BIN:
+    Serial.printf("[%u] get binary length: %u\n", num, length);
+    hexdump(payload, length);
+    break;
+  }
 }
-
+/*
+* Custom Functions
+*/
+void setAll(int value) {
+  for(int i=0;i<TOTAL;i++) {
+    digitalWrite(leds[i], value);
+  }
+}
+void updateStates() {
+  for(int i=0;i<TOTAL;i++) {
+    states[i] = digitalRead(leds[i]);
+  }
+}
 String formatStatus() {
-  state1 = digitalRead(led1);
-  state2 = digitalRead(led2);
-  state3 = digitalRead(led3);
-  state4 = digitalRead(led4);
+  updateStates();
   // {"type":"STATUS","data":"{"1":"1","2":"1","3":"1","4":"1"}"}
   String data = "{\"type\":\"STATUS\", \"data\":{";
 
   data += "\"1\":\"";
-  data += !state1;
+  data += !states[0];
   data += "\",";
 
   data += "\"2\":\"";
-  data += !state2;
+  data += !states[1];
   data += "\",";
 
   data += "\"3\":\"";
-  data += !state3;
+  data += !states[2];
   data += "\",";
 
   data += "\"4\":\"";
-  data += !state4;
+  data += !states[3];
   data += "\"";
 
   data += "}}";
   return data;
 }
+
