@@ -4,13 +4,15 @@
 #include <ESP8266mDNS.h>
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
+#include <EEPROM.h>
+
 
 void setAll(int value);
 void updateStates();
 String formatStatus();
 
-int TOTAL = 4;
-int DELAY = 1000;
+const int TOTAL = 4;
+const int DELAY = 1000;
 
 ESP8266WiFiMulti WiFiMulti;
 ESP8266WebServer server(80);
@@ -20,6 +22,7 @@ int buttons[] = {D5, D6, D7, D8};
 int leds[] = {D1, D2, D3, D4};
 int states[] = {LOW, LOW, LOW, LOW};
 int ap_state = 0;
+int saveToROM = 0;
 
 void setup() {
   for(int i=0;i<TOTAL;i++) {
@@ -30,9 +33,12 @@ void setup() {
   }
   setAll(LOW);
   Serial.begin(9600);
+  EEPROM.begin(512);
   Serial.setDebugOutput(true);
   Serial.println("Started");
-  WiFiMulti.addAP("Bhk", "12345678");
+  String ssid = readPROM(0, 40);
+  String password = readPROM(41, 80);
+  WiFiMulti.addAP(ssid.c_str(), password.c_str());
   Serial.print("Connecting");
   int count = 0;
   while(WiFiMulti.run() != WL_CONNECTED) {
@@ -50,8 +56,12 @@ void loop() {
   webSocket.loop();
   server.handleClient();
   updateStates();
-  if(WiFi.status() != WL_CONNECTED && ap_state == 0) startAccessPoint(); 
-
+  if(WiFi.status() != WL_CONNECTED && ap_state == 0) startAccessPoint();
+  if(saveToROM==1) {
+    saveToROM=0;
+    EEPROM.commit();
+   }
+   return;
   if(digitalRead(buttons[1]) == HIGH && digitalRead(buttons[2]) == HIGH) {
     setAll(HIGH);
     Serial.printf("All Off\n");
@@ -111,9 +121,9 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
   }
 }
 /*
- * Start / Stop Services
- */
- void startWebSocket() {
+* Start / Stop Services
+*/
+void startWebSocket() {
   while(!MDNS.begin("touchswitch")) {
     delay(100);
   }
@@ -122,17 +132,17 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
   Serial.printf("Web Socket Server started\n");
- }
- void startWebServer() {
+}
+void startWebServer() {
   server.on("/", handleRoot);
   server.on("/scan", handleScan);
   server.on("/connect", handleConnect);
   server.begin();
- }
- void startAccessPoint() {
-    Serial.println("Configuring access point...");
-    ap_state = WiFi.softAP("touchswitch21");
- }
+}
+void startAccessPoint() {
+  Serial.println("Configuring access point...");
+  ap_state = WiFi.softAP("smartswitch21");
+}
 /*
 * Custom Functions
 */
@@ -170,29 +180,50 @@ String formatStatus() {
   data += "}}";
   return data;
 }
+String readPROM(int startPos, int endPos) {
+  String data;
+  Serial.print("Reading from rom: ");
+  for (int i = startPos; i < endPos; ++i)
+  {
+    data += char(EEPROM.read(i));
+    delay(100);
+  }
+  Serial.println(data);
+  return data;
+}
+void savePROM(String data, int startPos, int endPos) {
+  Serial.print("Saving to rom: ");
+  for (int i = 0; i < data.length(); ++i)
+  {
+    EEPROM.write(i, data[i]);
+    Serial.print(data[i]);
+    delay(100);
+  }
+  Serial.println("");
+}
 /*
- * Web Server Handlers
- */
+* Web Server Handlers
+*/
 void handleRoot() {
-  server.send(200, "text/plain", "1"); 
+  server.send(200, "text/plain", "1");
 }
 void handleScan() {
   Serial.println("Request for scan");
   String data = "{\"networks\":[";
   int n = WiFi.scanNetworks();
   for (int i = 0; i < n; ++i) {
-      data += "{\"name\":\"";
-      data += WiFi.SSID(i);
-      data += "\",\"encryption\":\"";
-      data += WiFi.encryptionType(i);
-      data += "\"}";
-      if(i!=n-1) data += ",";
-    }
-   data  += "]}";
-   Serial.println(data);
-   server.send(200, "text/plain", data);
+    data += "{\"name\":\"";
+    data += WiFi.SSID(i);
+    data += "\",\"encryption\":\"";
+    data += WiFi.encryptionType(i);
+    data += "\"}";
+    if(i!=n-1) data += ",";
+  }
+  data  += "]}";
+  Serial.println(data);
+  server.send(200, "text/plain", data);
 }
- void handleConnect() {
+void handleConnect() {
   Serial.println("Request for connect");
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& root = jsonBuffer.parseObject(server.arg("plain"));
@@ -212,6 +243,10 @@ void handleScan() {
   } else {
     Serial.println("Connected.");
     server.send(200, "text/plain", "1");
+    savePROM(ssid, 0, 40);
+    savePROM(password, 41, 80);
+    saveToROM = 1;
+    delay(1000);
     WiFi.mode(WIFI_STA);
     ap_state = 0;
   }
